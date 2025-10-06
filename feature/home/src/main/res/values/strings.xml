@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="error_network">Error connecting to server</string>
+    <string name="error_unknown">An unknown error occurred</string>
+    <string name="error_location_not_provided">Location not available</string>
+    <string name="retry">Retry</string>
+    <string name="find_forecast">Find forecast</string>
+    <string name="latitude">Latitude</string>
+    <string name="longitude">Longitude</string>
+    <string name="use_my_location">Use my location</string>
+    <string name="get_forecast">Get forecast</string>
+    <string name="feels_like">Feels like: %1$s</string>
+    <string name="high_low">High %s . Low %s</string>
+    <string name="wind_label">Wind</string>
+    <string name="app_name">Weather</string>
+</resources>
