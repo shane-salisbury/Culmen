@@ -1,5 +1,10 @@
 package com.weather.feature.home
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -47,10 +52,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -59,8 +66,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.PermissionStatus
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import com.google.accompanist.permissions.shouldShowRationale
+import com.weather.core.common.exception.LocationDeniedException
+import com.weather.core.common.exception.LocationDeniedPermanentlyException
 import com.weather.core.designsystem.components.WeatherProgressIndicator
 import com.weather.core.designsystem.theme.DefaultPadding
 import com.weather.core.designsystem.theme.ExtraSmallPadding
@@ -79,22 +90,44 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    var askedOnce by rememberSaveable { mutableStateOf(false) }
 
     val locationPermissionState = rememberPermissionState(
         android.Manifest.permission.ACCESS_COARSE_LOCATION
     )
 
-    LaunchedEffect(locationPermissionState.status.isGranted) {
-        if (locationPermissionState.status.isGranted) {
-            viewModel.getWeather()
-        } else {
+
+    // Ask for permission the first time we enter this screen (only once)
+    LaunchedEffect(Unit) {
+        if (!locationPermissionState.status.isGranted && !askedOnce) {
+            askedOnce = true
             locationPermissionState.launchPermissionRequest()
+        }
+    }
+
+    // React to permission status *after* request has been made / user has interacted
+    LaunchedEffect(locationPermissionState.status) {
+        when (val status = locationPermissionState.status) {
+            PermissionStatus.Granted -> {
+                viewModel.getWeather()
+            }
+            is PermissionStatus.Denied -> {
+                Log.d("HomeScreen", "Location permission denied $status")
+                if (status.shouldShowRationale) {
+                    // User denied but not permanently: show rationale UI/state
+                    viewModel.permissionDenied(true)
+                } else {
+                    // Permanently denied (Don't ask again) or not granted after prompt
+                    viewModel.permissionDenied(false)
+                }
+            }
         }
     }
 
     HomeScreen(
         uiState = uiState,
         getWeather = viewModel::getWeather,
+        requestPermission = { locationPermissionState.launchPermissionRequest() },
         modifier = modifier,
     )
 }
@@ -104,11 +137,13 @@ fun HomeScreen(
 internal fun HomeScreen(
     uiState: HomeUiState,
     getWeather: (location: LocationCoordinates?) -> Unit,
+    requestPermission: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val pullToRefreshState = rememberPullToRefreshState()
     var isRefreshing by remember { mutableStateOf(false) }
     var showSearch by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
 
     LaunchedEffect(uiState) {
         isRefreshing = false
@@ -160,8 +195,15 @@ internal fun HomeScreen(
                 HomeUiState.Loading -> WeatherProgressIndicator()
                 is HomeUiState.Error -> ErrorView(
                     exception = uiState.exception,
-                    retry = { getWeather(null) }
+                    retry = {
+                        when (uiState.exception) {
+                            is LocationDeniedException -> requestPermission()
+                            is LocationDeniedPermanentlyException -> openAppSettings(context)
+                            else -> getWeather(null)
+                        }
+                    }
                 )
+
                 is HomeUiState.Success -> HomeDetails(
                     weather = uiState.weather,
                     showSearch = showSearch,
@@ -435,6 +477,14 @@ private fun DailyForecastCard(
     }
 }
 
+private fun openAppSettings(context: Context) {
+    val intent = Intent(
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        Uri.fromParts("package", context.packageName, null)
+    )
+    context.startActivity(intent)
+}
+
 @Composable
 private fun ErrorView(
     exception: Throwable?,
@@ -446,7 +496,7 @@ private fun ErrorView(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier.fillMaxSize(),
     ) {
-        Text(text = stringResource(exception.errorMessageResId))
+        Text(text = stringResource(exception.errorMessageResId), textAlign = TextAlign.Center)
 
         Button(
             onClick = retry,
@@ -455,7 +505,12 @@ private fun ErrorView(
                 containerColor = MaterialTheme.colorScheme.primary,
             )
         ) {
-            Text(text = stringResource(R.string.retry))
+            val buttonText = when (exception) {
+                is LocationDeniedPermanentlyException -> stringResource(R.string.open_settings)
+                is LocationDeniedException -> stringResource(R.string.request_permission)
+                else -> stringResource(R.string.retry)
+            }
+            Text(text = buttonText)
         }
     }
 }
@@ -465,7 +520,7 @@ private fun ErrorView(
 fun SearchComponentPreview(modifier: Modifier = Modifier) {
     WeatherTheme {
         SearchComponent(
-            onSearch =  { lat, lon ->
+            onSearch = { lat, lon ->
             },
             onUseMyLocation = {}
         )
@@ -523,6 +578,7 @@ private fun HomeScreenPreview() {
     WeatherTheme {
         HomeScreen(
             uiState = HomeUiState.Success(weather),
+            requestPermission = {},
             getWeather = {}
         )
     }

@@ -1,8 +1,9 @@
 package com.weather.feature.home
 
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.weather.core.common.exception.LocationDeniedException
+import com.weather.core.common.exception.LocationDeniedPermanentlyException
 import com.weather.core.common.exception.LocationNotProvidedException
 import com.weather.core.data.WeatherRepository
 import com.weather.core.location.LocationProvider
@@ -38,6 +39,13 @@ class HomeViewModel @Inject constructor(
                 fetchWeather(coord)
             }
         }
+    }
+
+    fun permissionDenied(shouldShowRationale: Boolean) {
+        if (shouldShowRationale)
+            _uiState.value = HomeUiState.Error(LocationDeniedException())
+        else
+            _uiState.value = HomeUiState.Error(LocationDeniedPermanentlyException())
     }
 
 
